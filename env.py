@@ -4,7 +4,7 @@ class SquareEnv2:
     # 4 endroits: 0-1
     #            | |
     #            3-2
-    def __init__(self, seed=None, start=0, goal=2):
+    def __init__(self, seed=None, start=1, goal=2):
         self.rng = random.Random(seed)
         self.roads = {
             0: [1, 3],
