@@ -2,27 +2,35 @@ import random
 from collections import Counter
 
 class GridEnv6x6:
+    """
+    Congestion game sur une grille 6x6.
+    - 4 agents se déplacent simultanément.
+    - Tous ont le MEME goal (objectif commun).
+    - Pas de collision: plusieurs agents peuvent être sur la même case.
+    - Congestion sur les ARÊTES: si k agents prennent la même arête au même step,
+      le coût du step (pour ceux-là) augmente (k).
+    """
+
     def __init__(self, seed=None, size=6, n_agents=4, max_steps=60,
-                 goal_reward=20.0, step_penalty=1.0, collision_penalty=5.0):
+                 base_cost=1.0, goal_reward=0.0, goal_node=35):
         self.rng = random.Random(seed)
         self.size = size
         self.n_agents = n_agents
         self.max_steps = max_steps
 
-        self.goal_reward = goal_reward
-        self.step_penalty = step_penalty
-        self.collision_penalty = collision_penalty
+        self.base_cost = float(base_cost)
+        self.goal_reward = float(goal_reward)  # optionnel (souvent 0 dans congestion game pur)
+        self.goal = int(goal_node)
 
         self.roads = self._build_roads()
 
-        # Exemples (tu peux changer)
-        self.starts = [0, 5, 30, 35]
-        self.goals  = [35, 30, 5, 0]
+        # starts (exemple) — tu peux changer
+        self.starts = [0, 5, 30, 34]
 
         self.t = 0
         self.pos = None
-        self.arrived = None  # True si agent déjà arrivé
-        self.cost = None     # coût cumulé (utile pour analyses)
+        self.cost = None
+        self.arrived = None
 
     def _build_roads(self):
         roads = {}
@@ -30,145 +38,124 @@ class GridEnv6x6:
             for c in range(self.size):
                 u = r * self.size + c
                 neigh = []
-                if r > 0: neigh.append((r - 1) * self.size + c)
-                if r < self.size - 1: neigh.append((r + 1) * self.size + c)
-                if c > 0: neigh.append(r * self.size + (c - 1))
-                if c < self.size - 1: neigh.append(r * self.size + (c + 1))
+                if r > 0: neigh.append((r - 1) * self.size + c)          # up
+                if r < self.size - 1: neigh.append((r + 1) * self.size + c)  # down
+                if c > 0: neigh.append(r * self.size + (c - 1))          # left
+                if c < self.size - 1: neigh.append(r * self.size + (c + 1))  # right
                 roads[u] = neigh
         return roads
 
     @staticmethod
     def _edge(u, v):
+        # arête non orientée (u-v == v-u)
         return (u, v) if u < v else (v, u)
 
     def reset(self):
         self.t = 0
         self.pos = list(self.starts)
+        self.cost = [0.0 for _ in range(self.n_agents)]
         self.arrived = [False for _ in range(self.n_agents)]
-        self.cost = [0 for _ in range(self.n_agents)]
         return self._get_obs()
 
     def _get_obs(self):
-        # obs simple (compatible vizu): pos/goals/cost/arrived
         return {
             "pos": tuple(self.pos),
-            "goals": tuple(self.goals),
+            "goal": self.goal,
             "cost": tuple(self.cost),
             "arrived": tuple(self.arrived),
         }
 
-    def step(self, dests, learner_idx=0):
+    def step(self, dests):
         """
-        dests: liste de destinations (len=4).
-        learner_idx: quel agent on considère comme 'celui qu'on entraîne'
-                    (utile pour arrêter l'épisode quand il atteint son goal)
+        dests: liste (len=4) de destinations proposées.
+        Retour: obs, rewards, done, info
+        rewards = -coût (minimiser coût <=> maximiser reward)
         """
         self.t += 1
 
-        rewards = [0.0 for _ in range(self.n_agents)]
-
-        # 1) Propositions de mouvement (les agents arrivés ne bougent plus)
-        proposed_pos = list(self.pos)
+        # 1) appliquer mouvements (pas de collision, donc on accepte tous)
         edges = [None] * self.n_agents
+        new_pos = list(self.pos)
 
         for i in range(self.n_agents):
             if self.arrived[i]:
-                proposed_pos[i] = self.pos[i]
+                # agent déjà arrivé: il reste au goal
+                new_pos[i] = self.pos[i]
                 edges[i] = None
                 continue
 
             u = self.pos[i]
             v = dests[i]
+
             if v in self.roads[u]:
-                proposed_pos[i] = v
+                new_pos[i] = v
                 edges[i] = self._edge(u, v)
             else:
-                proposed_pos[i] = u
+                # mouvement invalide => reste
+                new_pos[i] = u
                 edges[i] = None
 
-        # 2) Collisions: plusieurs agents veulent la même case => annulation
-        counts_pos = Counter(proposed_pos)
-        collisions = [False] * self.n_agents
-        for i in range(self.n_agents):
-            if self.arrived[i]:
-                continue
-            if counts_pos[proposed_pos[i]] > 1:
-                collisions[i] = True
-                proposed_pos[i] = self.pos[i]
-                edges[i] = None
-
-        # 3) Congestion sur arêtes (après annulation collisions)
+        # 2) congestion sur arêtes
         edge_counts = Counter([e for e in edges if e is not None])
 
-        # 4) Calcul rewards + coûts + appliquer mouvements
+        rewards = [0.0 for _ in range(self.n_agents)]
+
+        # 3) coûts + rewards
         for i in range(self.n_agents):
             if self.arrived[i]:
                 rewards[i] = 0.0
                 continue
 
-            r = -self.step_penalty  # pénalité de temps
-
-            if collisions[i]:
-                r -= self.collision_penalty
-
+            step_cost = self.base_cost  # coût minimal (temps / effort)
             if edges[i] is not None:
-                k = edge_counts[edges[i]]  # nb d'agents sur la même arête
-                # pénalité congestion (plus k est grand, plus c'est mauvais)
-                r -= float(k)
-                self.cost[i] += 1 * k
-            else:
-                # mouvement annulé/invalide => coût minimal
-                self.cost[i] += 1
+                k = edge_counts[edges[i]]     # nb d'agents sur la même arête
+                step_cost = self.base_cost * k
 
-            # appliquer position
-            self.pos[i] = proposed_pos[i]
+            self.cost[i] += step_cost
+
+            # reward = -coût (logique RL)
+            r = -step_cost
 
             # goal atteint ?
-            if self.pos[i] == self.goals[i]:
+            if new_pos[i] == self.goal:
                 self.arrived[i] = True
-                r += self.goal_reward
+                r += self.goal_reward  # souvent 0 en congestion game pur
 
             rewards[i] = r
 
-        # 5) Done: on stoppe quand le learner arrive OU max_steps
-        done = self.arrived[learner_idx] or (self.t >= self.max_steps)
+        # appliquer positions
+        self.pos = new_pos
+
+        # done si tous arrivés OU max_steps
+        done = all(self.arrived) or (self.t >= self.max_steps)
 
         obs = self._get_obs()
-        info = {
-            "t": self.t,
-            "collisions": tuple(collisions),
-            "edge_counts": edge_counts,
-            "arrived": tuple(self.arrived),
-        }
+        info = {"t": self.t, "edge_counts": edge_counts}
         return obs, rewards, done, info
 
     def auto_step(self):
-        # random pour tous les agents non arrivés
+        """Actions random: chaque agent choisit un voisin au hasard."""
         dests = []
         for i in range(self.n_agents):
             u = self.pos[i]
             dests.append(self.rng.choice(self.roads[u]))
         return dests
 
-if __name__ == "__main__":
-    print("=== TEST ENV 6x6 (agents random) ===")
 
-    env = GridEnv6x6(seed=42, max_steps=20)
+if __name__ == "__main__":
+    print("=== TEST ENV 6x6 (même goal, pas de collision) ===")
+    env = GridEnv6x6(seed=42, max_steps=15, goal_node=35, goal_reward=0.0)
     obs = env.reset()
     print("reset:", obs)
 
     done = False
     while not done:
         dests = env.auto_step()
-        obs, rewards, done, info = env.step(dests, learner_idx=0)
-
+        obs, rewards, done, info = env.step(dests)
         print(
-            f"t={info['t']} "
-            f"pos={obs['pos']} "
+            f"t={info['t']} pos={obs['pos']} "
+            f"cost={tuple(round(c,1) for c in obs['cost'])} "
             f"rewards={tuple(round(r,1) for r in rewards)} "
-            f"arrived={obs['arrived']} "
-            f"collisions={info['collisions']} "
-            f"done={done}"
+            f"arrived={obs['arrived']} done={done}"
         )
-
     print("=== FIN TEST ===")

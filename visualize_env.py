@@ -10,25 +10,22 @@ def node_to_rc(node, size):
     return node // size, node % size
 
 
-def collect_history(env, learner_idx=0):
+def collect_history(env):
     """Joue un épisode random et enregistre l'historique des positions."""
     obs = env.reset()
     history = [obs["pos"]]
 
     done = False
     while not done:
-        # auto_step renvoie maintenant les destinations (actions) des agents
         dests = env.auto_step()
-
-        # step renvoie obs, rewards, done, info
-        obs, rewards, done, info = env.step(dests, learner_idx=learner_idx)
+        obs, rewards, done, info = env.step(dests)  # <-- plus de learner_idx
         history.append(obs["pos"])
 
     return history
 
 
-def animate_agents(history, goals, size):
-    """Animation matplotlib : positions des agents + goals."""
+def animate_agents(history, goal, size):
+    """Animation matplotlib : positions des agents + goal commun."""
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_title("Congestion Game 6x6 - Agents (random)")
     ax.set_xlim(-0.5, size - 0.5)
@@ -37,11 +34,9 @@ def animate_agents(history, goals, size):
     ax.set_yticks(range(size))
     ax.grid(True)
 
-    # Goals en X
-    goals_rc = [node_to_rc(g, size) for g in goals]
-    gx = [c for r, c in goals_rc]
-    gy = [r for r, c in goals_rc]
-    ax.scatter(gx, gy, marker="X", s=200)
+    # Goal commun en X
+    gr, gc = node_to_rc(goal, size)
+    ax.scatter([gc], [gr], marker="X", s=250)
 
     # Agents
     scat = ax.scatter([], [], s=250)
@@ -90,10 +85,10 @@ def main():
     env = GridEnv6x6(seed=42, max_steps=60)
     size = env.size
 
-    history = collect_history(env, learner_idx=0)
+    history = collect_history(env)
 
-    # Animation (voitures + goals)
-    animate_agents(history, env.goals, size)
+    # Animation (voitures + goal commun)
+    animate_agents(history, env.goal, size)
 
     # Heatmap (trafic)
     show_heatmap(history, size)
@@ -101,4 +96,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
