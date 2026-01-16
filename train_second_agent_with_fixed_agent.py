@@ -2,7 +2,7 @@ import os
 import json
 import random
 from collections import deque
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 import torch
 import torch.nn as nn
@@ -115,7 +115,6 @@ def freeze_feature_layers(q: QNet, freeze: bool):
     Gel/dégel des 2 premières Linear (feature extractor).
     net = [Linear, ReLU, Linear, ReLU, Linear]
     """
-    # Linear 0 et Linear 2
     layers_to_freeze = [0, 2]
     for idx in layers_to_freeze:
         layer = q.net[idx]
@@ -125,8 +124,64 @@ def freeze_feature_layers(q: QNet, freeze: bool):
 
 
 # ----------------------------
+# Greedy "hyper optimisateur" pour agents non-DQN (2 & 3)
+# ----------------------------
+def manhattan(node_a: int, node_b: int, size: int) -> int:
+    ar, ac = divmod(node_a, size)
+    br, bc = divmod(node_b, size)
+    return abs(ar - br) + abs(ac - bc)
+
+
+def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
+    """
+    Choisit l'action valide qui minimise la distance Manhattan au goal après déplacement.
+    Tie-break déterministe via pref_order.
+    """
+    if env.arrived[agent_i]:
+        return 0  # STAY
+
+    u = env.pos[agent_i]
+    goal = env.goal
+    size = env.size
+    valid = env.valid_actions(agent_i)
+
+    # ordre de préférence pour départager à distance égale
+    pref_order = [1, 2, 3, 4, 0]  # UP, DOWN, LEFT, RIGHT, STAY
+
+    ur, uc = divmod(u, size)
+
+    best_a = valid[0]
+    best_d = 10**9
+    best_rank = 10**9
+
+    for a in valid:
+        nr, nc = ur, uc
+        if a == 1:        # UP
+            nr = max(0, ur - 1)
+        elif a == 2:      # DOWN
+            nr = min(size - 1, ur + 1)
+        elif a == 3:      # LEFT
+            nc = max(0, uc - 1)
+        elif a == 4:      # RIGHT
+            nc = min(size - 1, uc + 1)
+        # a == 0 -> stay
+
+        v = nr * size + nc
+        d = manhattan(v, goal, size)
+        rank = pref_order.index(a) if a in pref_order else 999
+
+        if (d < best_d) or (d == best_d and rank < best_rank):
+            best_d = d
+            best_rank = rank
+            best_a = a
+
+    return best_a
+
+
+# ----------------------------
 # Training: agent 1 apprend, agent 0 fixé
 # + warm start agent1 depuis agent0
+# + agents 2 & 3 greedy vers le goal
 # ----------------------------
 def train_agent1_with_fixed_agent0_warmstart(
     agent0_ckpt: str,
@@ -144,7 +199,7 @@ def train_agent1_with_fixed_agent0_warmstart(
     cfg = EnvConfig(size=6, n_agents=4, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=seed)
     env = GridCongestionEnv(cfg)
 
-    # Agent 0 figé
+    # Agent 0 figé (DQN chargé)
     fixed_id = 0
     fixed_agent = load_fixed_agent(agent0_ckpt, cfg, device=device)
 
@@ -174,8 +229,7 @@ def train_agent1_with_fixed_agent0_warmstart(
     target_update_every = 500
     max_grad_norm = 10.0
 
-    # IMPORTANT avec warm-start: eps plus bas (sinon tu casses la policy)
-    # Tu peux monter eps_start si tu veux plus d'explo au début, mais là c'est volontairement conservateur.
+    # avec warm-start: eps plus bas
     eps_start, eps_end = 0.30, 0.05
     eps_decay_steps = 150_000
 
@@ -198,7 +252,7 @@ def train_agent1_with_fixed_agent0_warmstart(
 
             actions = []
 
-            # -------- Agent 0 (fixe greedy) --------
+            # -------- Agent 0 (fixe DQN greedy) --------
             if obs_list[fixed_id]["arrived"]:
                 a0 = 0
             else:
@@ -224,14 +278,14 @@ def train_agent1_with_fixed_agent0_warmstart(
                         qvals1 = q(s1)
                     a1 = masked_argmax(qvals1, valid1)
 
-            # -------- Agents 2 & 3 random --------
+            # -------- Agents 2 & 3 GREEDY vers le goal --------
             for i in range(cfg.n_agents):
                 if i == fixed_id:
                     actions.append(a0)
                 elif i == train_agent_id:
                     actions.append(a1)
                 else:
-                    actions.append(random.choice(env.valid_actions(i)))
+                    actions.append(greedy_to_goal_action(env, i))
 
             next_obs_list, rewards, terminated, truncated, info = env.step(actions, global_obs=False)
             done_global = terminated or truncated
@@ -295,6 +349,7 @@ def train_agent1_with_fixed_agent0_warmstart(
         "trained_agent_id": train_agent_id,
         "warmstart_from_agent0": warmstart_from_agent0,
         "freeze_steps": freeze_steps,
+        "other_agents_policy": "greedy_to_goal_action (agents != 0,1)",
         "env_config": {
             "size": cfg.size,
             "n_agents": cfg.n_agents,

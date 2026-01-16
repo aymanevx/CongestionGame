@@ -104,6 +104,64 @@ def masked_argmax(qvals: torch.Tensor, valid_actions: List[int]) -> int:
 
 
 # ----------------------------
+# Hyper-optimisateur (greedy direct vers goal)
+# ----------------------------
+
+def manhattan(node_a: int, node_b: int, size: int) -> int:
+    ar, ac = divmod(node_a, size)
+    br, bc = divmod(node_b, size)
+    return abs(ar - br) + abs(ac - bc)
+
+
+def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
+    """
+    Choisit l'action valide qui minimise la distance Manhattan au goal après mouvement.
+    Tie-break déterministe via l'ordre pref_order.
+    """
+    if env.arrived[agent_i]:
+        return 0  # STAY
+
+    u = env.pos[agent_i]
+    goal = env.goal
+    size = env.size
+
+    valid = env.valid_actions(agent_i)
+
+    # ordre de préférence pour départager à distance égale
+    # (tu peux changer l'ordre si tu veux une autre "personnalité")
+    pref_order = [1, 2, 3, 4, 0]  # UP, DOWN, LEFT, RIGHT, STAY
+
+    ur, uc = divmod(u, size)
+
+    best_a = valid[0]
+    best_d = 10**9
+    best_rank = 10**9
+
+    for a in valid:
+        nr, nc = ur, uc
+        if a == 1:        # UP
+            nr = max(0, ur - 1)
+        elif a == 2:      # DOWN
+            nr = min(size - 1, ur + 1)
+        elif a == 3:      # LEFT
+            nc = max(0, uc - 1)
+        elif a == 4:      # RIGHT
+            nc = min(size - 1, uc + 1)
+        # a == 0 -> stay
+
+        v = nr * size + nc
+        d = manhattan(v, goal, size)
+        rank = pref_order.index(a) if a in pref_order else 999
+
+        if (d < best_d) or (d == best_d and rank < best_rank):
+            best_d = d
+            best_rank = rank
+            best_a = a
+
+    return best_a
+
+
+# ----------------------------
 # Training (1 agent only)
 # ----------------------------
 
@@ -121,7 +179,7 @@ def train_single_agent_dqn(
     cfg = EnvConfig(size=6, n_agents=4, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=seed)
     env = GridCongestionEnv(cfg)
 
-    # Obs dim dynamique: 2(self) + 2(goal) + 2*(n_agents-1) + 1(arrived) + 1(t)
+    # Obs dim: 2(self) + 2(goal) + 2*(n_agents-1) + 1(arrived) + 1(t)
     obs_dim = 2 + 2 + 2 * (cfg.n_agents - 1) + 1 + 1
     n_actions = 5
 
@@ -130,19 +188,17 @@ def train_single_agent_dqn(
     q_targ.load_state_dict(q.state_dict())
     q_targ.eval()
 
-    # Plus stable que 1e-3 souvent
     opt = optim.Adam(q.parameters(), lr=5e-4)
-
     rb = ReplayBuffer(capacity=100_000)
 
     gamma = 0.99
     batch_size = 256
-    learning_starts = 3000         # un peu plus long avant d'apprendre
-    target_update_every = 500      # en steps
+    learning_starts = 3000
+    target_update_every = 500
     train_every = 1
     max_grad_norm = 10.0
 
-    # Epsilon decay (plus lent)
+    # Epsilon decay
     eps_start, eps_end = 1.0, 0.05
     eps_decay_steps = 200_000
 
@@ -160,7 +216,6 @@ def train_single_agent_dqn(
             frac = max(0.0, (eps_decay_steps - global_step) / eps_decay_steps)
             eps = eps_end + (eps_start - eps_end) * frac
 
-            # si l'agent est déjà arrivé, on le laisse "STAY" mais on n'apprend plus sur lui
             agent_already_arrived = bool(obs_list[agent_id]["arrived"])
 
             # action agent entraîné
@@ -177,29 +232,27 @@ def train_single_agent_dqn(
                         qvals = q(s)
                     a_train = masked_argmax(qvals, valid)
 
-            # actions autres agents: random
+            # actions autres agents: hyper-optimisateurs (greedy direct)
             actions = []
             for i in range(cfg.n_agents):
                 if i == agent_id:
                     actions.append(a_train)
                 else:
-                    actions.append(random.choice(env.valid_actions(i)))
+                    actions.append(greedy_to_goal_action(env, i))
 
             next_obs_list, rewards, terminated, truncated, info = env.step(actions, global_obs=False)
             done_global = terminated or truncated
 
-            # Reward de l'agent entraîné
             r = float(rewards[agent_id])
             ep_return += r
 
-            # Stockage / apprentissage UNIQUEMENT si l'agent n'était pas déjà arrivé
+            # Stockage / apprentissage seulement si l'agent n'était pas déjà arrivé
             if not agent_already_arrived:
                 s2 = obs_to_vec(next_obs_list[agent_id], cfg.size, cfg.max_steps).to(device)
 
-                # done au niveau agent (crucial)
+                # done au niveau agent
                 done_agent = float(next_obs_list[agent_id]["arrived"] or truncated)
 
-                # store transition
                 rb.push(
                     obs_to_vec(obs_list[agent_id], cfg.size, cfg.max_steps).cpu(),
                     a_train,
@@ -241,9 +294,11 @@ def train_single_agent_dqn(
         returns_window.append(ep_return)
         if ep % 50 == 0:
             w = sum(returns_window) / len(returns_window)
-            print(f"ep={ep:5d}  return={ep_return:8.2f}  window100={w:8.2f}  eps={eps:5.3f}  steps={global_step}")
+            print(
+                f"ep={ep:5d}  return={ep_return:8.2f}  window100={w:8.2f}  "
+                f"eps={eps:5.3f}  steps={global_step}"
+            )
 
-            # Save best (optionnel)
             if w > best_window100:
                 best_window100 = w
                 torch.save(q.state_dict(), os.path.join(save_dir, f"agent{agent_id}_best.pt"))

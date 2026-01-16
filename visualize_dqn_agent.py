@@ -69,6 +69,62 @@ def masked_argmax(qvals: torch.Tensor, valid_actions):
     return best_a
 
 
+# ----------------------------
+# Greedy "hyper optimisateur" pour les autres agents
+# ----------------------------
+def manhattan(node_a: int, node_b: int, size: int) -> int:
+    ar, ac = divmod(node_a, size)
+    br, bc = divmod(node_b, size)
+    return abs(ar - br) + abs(ac - bc)
+
+
+def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
+    """
+    Choisit l'action valide qui minimise la distance Manhattan au goal après le déplacement.
+    Tie-break déterministe via pref_order.
+    """
+    # si déjà arrivé -> stay
+    if env.arrived[agent_i]:
+        return 0  # STAY
+
+    u = env.pos[agent_i]
+    goal = env.goal
+    size = env.size
+    valid = env.valid_actions(agent_i)
+
+    # Tie-break: tu peux changer cet ordre si tu veux
+    pref_order = [1, 2, 3, 4, 0]  # UP, DOWN, LEFT, RIGHT, STAY
+
+    ur, uc = divmod(u, size)
+
+    best_a = valid[0]
+    best_d = 10**9
+    best_rank = 10**9
+
+    for a in valid:
+        nr, nc = ur, uc
+        if a == 1:        # UP
+            nr = max(0, ur - 1)
+        elif a == 2:      # DOWN
+            nr = min(size - 1, ur + 1)
+        elif a == 3:      # LEFT
+            nc = max(0, uc - 1)
+        elif a == 4:      # RIGHT
+            nc = min(size - 1, uc + 1)
+        # a == 0 -> stay
+
+        v = nr * size + nc
+        d = manhattan(v, goal, size)
+        rank = pref_order.index(a) if a in pref_order else 999
+
+        if (d < best_d) or (d == best_d and rank < best_rank):
+            best_d = d
+            best_rank = rank
+            best_a = a
+
+    return best_a
+
+
 def load_trained_agent(checkpoint_path: str, cfg: EnvConfig, device: str = "cpu"):
     obs_dim = 2 + 2 + 2 * (cfg.n_agents - 1) + 1 + 1
     n_actions = 5
@@ -139,14 +195,14 @@ def visualize_episode_step_by_step(
                 qvals1 = model1(s1)
             a1 = masked_argmax(qvals1, valid1)
 
-        # --- Autres agents random ---
+        # --- Autres agents GREEDY vers le goal ---
         for i in range(env.n_agents):
             if i == agent0_id:
                 actions.append(a0)
             elif i == agent1_id:
                 actions.append(a1)
             else:
-                actions.append(env.rng.choice(env.valid_actions(i)))
+                actions.append(greedy_to_goal_action(env, i))
 
         next_obs_list, rewards, terminated, truncated, info = env.step(actions, global_obs=False)
         done_global = terminated or truncated
@@ -216,7 +272,8 @@ def visualize_episode_step_by_step(
     colors[0] = "red"
     colors[1] = "orange"
 
-    agent_names = [f"Agent {i} (Random)" for i in range(env.n_agents)]
+    # Labels adaptés
+    agent_names = [f"Agent {i} (Greedy)" for i in range(env.n_agents)]
     agent_names[0] = "Agent 0 (DQN)"
     agent_names[1] = "Agent 1 (DQN)"
 
@@ -253,10 +310,10 @@ def visualize_episode_step_by_step(
         Line2D([0], [0], marker="*", color="w", markerfacecolor="green", markersize=15, label="Goal"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="red", markersize=10, label="Agent 0 (DQN)"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="orange", markersize=10, label="Agent 1 (DQN)"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="blue", markersize=10, label="Agents random"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="blue", markersize=10, label="Agents greedy"),
         Line2D([0], [0], marker="x", color="darkred", linewidth=2, label="Départ agent 0"),
         Line2D([0], [0], marker="x", color="darkorange", linewidth=2, label="Départ agent 1"),
-        Line2D([0], [0], marker="x", color="darkblue", linewidth=2, label="Départs random"),
+        Line2D([0], [0], marker="x", color="darkblue", linewidth=2, label="Départs greedy"),
     ]
     ax1.legend(handles=legend_elements, loc="upper left", fontsize=10)
 
