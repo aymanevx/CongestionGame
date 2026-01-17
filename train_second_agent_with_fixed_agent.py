@@ -196,7 +196,7 @@ def train_agent1_with_fixed_agent0_warmstart(
     os.makedirs(save_dir, exist_ok=True)
     set_seed(seed)
 
-    cfg = EnvConfig(size=6, n_agents=4, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=seed)
+    cfg = EnvConfig(size=6, n_agents=10, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=seed)
     env = GridCongestionEnv(cfg)
 
     # Agent 0 figé (DQN chargé)
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     train_agent1_with_fixed_agent0_warmstart(
         agent0_ckpt=agent0_ckpt,
         train_agent_id=1,
-        episodes=2000,
+        episodes=5000,
         seed=0,
         save_dir="checkpoints_agent1",
         device=device,

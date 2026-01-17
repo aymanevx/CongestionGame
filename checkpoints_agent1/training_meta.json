@@ -1,0 +1,30 @@
+{
+  "fixed_agent_id": 0,
+  "fixed_agent_ckpt": "checkpoints_single\\agent0_best.pt",
+  "trained_agent_id": 1,
+  "warmstart_from_agent0": true,
+  "freeze_steps": 20000,
+  "other_agents_policy": "greedy_to_goal_action (agents != 0,1)",
+  "env_config": {
+    "size": 6,
+    "n_agents": 10,
+    "max_steps": 60,
+    "base_cost": 1.0,
+    "goal_reward": 20.0,
+    "seed": 0
+  },
+  "train": {
+    "episodes": 5000,
+    "seed": 0,
+    "gamma": 0.99,
+    "batch_size": 256,
+    "learning_starts": 2000,
+    "target_update_every": 500,
+    "eps_start": 0.3,
+    "eps_end": 0.05,
+    "eps_decay_steps": 150000,
+    "lr": 0.0005
+  },
+  "best_window100_return": 13.868724374884792,
+  "final_checkpoint": "checkpoints_agent1\\agent1_final.pt"
+}

@@ -275,7 +275,7 @@ def visualize_episode_step_by_step(
     # Labels adaptés
     agent_names = [f"Agent {i} (Greedy)" for i in range(env.n_agents)]
     agent_names[0] = "Agent 0 (DQN)"
-    agent_names[1] = "Agent 1 (DQN)"
+    agent_names[1] = "Agent 1 (DQN)"  # Agents 2-9 restent greedy
 
     def update(frame: int):
         positions = history_pos[frame]
@@ -326,7 +326,7 @@ def visualize_episode_step_by_step(
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    cfg = EnvConfig(size=6, n_agents=4, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=None)
+    cfg = EnvConfig(size=6, n_agents=10, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=None)
     env = GridCongestionEnv(cfg)
 
     # --- Load agent 0 ---

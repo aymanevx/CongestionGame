@@ -1,0 +1,25 @@
+{
+  "agent_id": 0,
+  "env_config": {
+    "size": 6,
+    "n_agents": 10,
+    "max_steps": 60,
+    "base_cost": 1.0,
+    "goal_reward": 20.0,
+    "seed": 0
+  },
+  "train": {
+    "episodes": 20000,
+    "seed": 0,
+    "gamma": 0.99,
+    "batch_size": 256,
+    "learning_starts": 3000,
+    "target_update_every": 500,
+    "eps_start": 1.0,
+    "eps_end": 0.05,
+    "eps_decay_steps": 200000,
+    "lr": 0.0005
+  },
+  "best_window100_return": 15.627451660040611,
+  "final_checkpoint": "checkpoints_single\\agent0_final.pt"
+}

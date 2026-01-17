@@ -176,7 +176,7 @@ def train_single_agent_dqn(
     set_seed(seed)
 
     # Env
-    cfg = EnvConfig(size=6, n_agents=4, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=seed)
+    cfg = EnvConfig(size=6, n_agents=10, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=seed)
     env = GridCongestionEnv(cfg)
 
     # Obs dim: 2(self) + 2(goal) + 2*(n_agents-1) + 1(arrived) + 1(t)
@@ -343,7 +343,7 @@ def train_single_agent_dqn(
 if __name__ == "__main__":
     train_single_agent_dqn(
         agent_id=0,
-        episodes=3000,
+        episodes=20000,
         seed=0,
         save_dir="checkpoints_single",
         device="cpu",  # "cuda" si dispo
