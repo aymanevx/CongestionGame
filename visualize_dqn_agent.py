@@ -1,3 +1,17 @@
+"""
+Interactive Visualization of DQN Agents
+========================================
+
+Visualizes trained DQN agents navigating the congestion game environment
+with animated step-by-step playback, showing agent positions, costs, and rewards.
+
+Features:
+- Real-time animation of agent movements
+- Side-by-side grid display and information panel
+- Cost and reward tracking for each agent
+- Support for comparing multiple trained agents
+"""
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,10 +24,16 @@ import torch.nn as nn
 from env_6x6 import GridCongestionEnv, EnvConfig
 
 
-# ----------------------------
-# Même encodage que train_single_dqn.py
-# ----------------------------
+# ============================================================================
+# OBSERVATION ENCODING (same as training scripts)
+# ============================================================================
+
 def obs_to_vec(obs, size: int, max_steps: int) -> torch.Tensor:
+    """
+    Convert observation dictionary to normalized feature vector.
+    
+    See train_single_dqn.py for detailed documentation.
+    """
     self_pos = int(obs["self_pos"])
     goal = int(obs["goal"])
     others_pos = list(obs["others_pos"])
@@ -39,7 +59,13 @@ def obs_to_vec(obs, size: int, max_steps: int) -> torch.Tensor:
     return torch.tensor(feats, dtype=torch.float32)
 
 
+# ============================================================================
+# NEURAL NETWORK ARCHITECTURE (same as training scripts)
+# ============================================================================
+
 class QNet(nn.Module):
+    """Q-Network for DQN agents."""
+    
     def __init__(self, obs_dim: int, n_actions: int, hidden: int = 128):
         super().__init__()
         self.net = nn.Sequential(
@@ -54,11 +80,22 @@ class QNet(nn.Module):
         return self.net(x)
 
 
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
 def node_to_rc(node: int, size: int):
+    """Convert node index to (row, column) coordinates."""
     return node // size, node % size
 
 
 def masked_argmax(qvals: torch.Tensor, valid_actions):
+    """
+    Select best action from valid actions only.
+    
+    Finds the action with highest Q-value among those that are valid
+    (respecting environment constraints like grid boundaries).
+    """
     best_a = valid_actions[0]
     best_q = qvals[best_a].item()
     for a in valid_actions[1:]:
@@ -69,10 +106,12 @@ def masked_argmax(qvals: torch.Tensor, valid_actions):
     return best_a
 
 
-# ----------------------------
-# Greedy "hyper optimisateur" pour les autres agents
-# ----------------------------
+# ============================================================================
+# GREEDY BASELINE POLICY
+# ============================================================================
+
 def manhattan(node_a: int, node_b: int, size: int) -> int:
+    """Calculate Manhattan distance between two nodes on grid."""
     ar, ac = divmod(node_a, size)
     br, bc = divmod(node_b, size)
     return abs(ar - br) + abs(ac - bc)
@@ -80,10 +119,12 @@ def manhattan(node_a: int, node_b: int, size: int) -> int:
 
 def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
     """
-    Choisit l'action valide qui minimise la distance Manhattan au goal après le déplacement.
-    Tie-break déterministe via pref_order.
+    Greedy policy: select action minimizing Manhattan distance to goal.
+    
+    Used by non-trained background agents. When multiple actions achieve
+    equal distance, uses deterministic tie-breaking rule.
     """
-    # si déjà arrivé -> stay
+    # If already arrived, stay put
     if env.arrived[agent_i]:
         return 0  # STAY
 
@@ -92,7 +133,7 @@ def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
     size = env.size
     valid = env.valid_actions(agent_i)
 
-    # Tie-break: tu peux changer cet ordre si tu veux
+    # Preference order for tie-breaking: prioritize movement over staying
     pref_order = [1, 2, 3, 4, 0]  # UP, DOWN, LEFT, RIGHT, STAY
 
     ur, uc = divmod(u, size)
@@ -101,6 +142,7 @@ def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
     best_d = 10**9
     best_rank = 10**9
 
+    # Evaluate each valid action
     for a in valid:
         nr, nc = ur, uc
         if a == 1:        # UP
@@ -111,12 +153,13 @@ def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
             nc = max(0, uc - 1)
         elif a == 4:      # RIGHT
             nc = min(size - 1, uc + 1)
-        # a == 0 -> stay
+        # a == 0: STAY
 
         v = nr * size + nc
         d = manhattan(v, goal, size)
         rank = pref_order.index(a) if a in pref_order else 999
 
+        # Choose action with minimum distance (or best rank if tied)
         if (d < best_d) or (d == best_d and rank < best_rank):
             best_d = d
             best_rank = rank
@@ -125,7 +168,22 @@ def greedy_to_goal_action(env: GridCongestionEnv, agent_i: int) -> int:
     return best_a
 
 
+# ============================================================================
+# MODEL LOADING UTILITIES
+# ============================================================================
+
 def load_trained_agent(checkpoint_path: str, cfg: EnvConfig, device: str = "cpu"):
+    """
+    Load a trained DQN agent from checkpoint file.
+    
+    Args:
+        checkpoint_path: Path to model checkpoint (.pt file)
+        cfg: Environment configuration
+        device: Compute device ("cpu" or "cuda")
+        
+    Returns:
+        Loaded model in eval mode
+    """
     obs_dim = 2 + 2 + 2 * (cfg.n_agents - 1) + 1 + 1
     n_actions = 5
     model = QNet(obs_dim, n_actions, hidden=128).to(device)
@@ -136,6 +194,18 @@ def load_trained_agent(checkpoint_path: str, cfg: EnvConfig, device: str = "cpu"
 
 
 def pick_ckpt(dirpath: str, agent_id: int):
+    """
+    Locate best or final checkpoint for an agent.
+    
+    Prefers 'best' checkpoint; falls back to 'final' if not found.
+    
+    Args:
+        dirpath: Directory containing checkpoints
+        agent_id: Agent identifier
+        
+    Returns:
+        Path to checkpoint, or None if not found
+    """
     best_path = os.path.join(dirpath, f"agent{agent_id}_best.pt")
     final_path = os.path.join(dirpath, f"agent{agent_id}_final.pt")
     if os.path.exists(best_path):
@@ -145,6 +215,10 @@ def pick_ckpt(dirpath: str, agent_id: int):
     return None
 
 
+# ============================================================================
+# VISUALIZATION FUNCTION
+# ============================================================================
+
 def visualize_episode_step_by_step(
     env: GridCongestionEnv,
     model0: nn.Module,
@@ -153,14 +227,33 @@ def visualize_episode_step_by_step(
     device: str = "cpu",
     interval_ms: int = 500,
 ):
+    """
+    Run and visualize a single episode with two DQN agents.
+    
+    Shows animated grid with agent positions and an information panel
+    displaying costs, rewards, and arrival status.
+    
+    Args:
+        env: Environment instance
+        model0: Trained model for Agent 0
+        model1: Trained model for Agent 1
+        episode_num: Episode number (for display)
+        device: Compute device
+        interval_ms: Animation frame interval in milliseconds
+        
+    Returns:
+        Tuple of (reward0, arrived0, reward1, arrived1, final_costs)
+    """
     agent0_id = 0
     agent1_id = 1
 
+    # ---- Initialize episode ----
     obs_list = env.reset(global_obs=False)
     size = env.size
     goal = env.goal
     starts = list(env.starts)
 
+    # ---- Record episode trajectory ----
     history_pos = [tuple(env.pos)]
     history_costs = [tuple(env.cost)]
     history_rewards0 = []
@@ -172,10 +265,11 @@ def visualize_episode_step_by_step(
     arrived0 = False
     arrived1 = False
 
+    # ---- Run episode step by step ----
     while not done_global:
         actions = []
 
-        # --- Action agent0 (DQN greedy) ---
+        # ---- Agent 0: DQN greedy ----
         if obs_list[agent0_id]["arrived"]:
             a0 = 0
         else:
@@ -185,7 +279,7 @@ def visualize_episode_step_by_step(
                 qvals0 = model0(s0)
             a0 = masked_argmax(qvals0, valid0)
 
-        # --- Action agent1 (DQN greedy) ---
+        # ---- Agent 1: DQN greedy ----
         if obs_list[agent1_id]["arrived"]:
             a1 = 0
         else:
@@ -195,7 +289,7 @@ def visualize_episode_step_by_step(
                 qvals1 = model1(s1)
             a1 = masked_argmax(qvals1, valid1)
 
-        # --- Autres agents GREEDY vers le goal ---
+        # ---- Other agents: Greedy baseline ----
         for i in range(env.n_agents):
             if i == agent0_id:
                 actions.append(a0)
@@ -204,9 +298,11 @@ def visualize_episode_step_by_step(
             else:
                 actions.append(greedy_to_goal_action(env, i))
 
+        # ---- Execute step ----
         next_obs_list, rewards, terminated, truncated, info = env.step(actions, global_obs=False)
         done_global = terminated or truncated
 
+        # ---- Accumulate rewards ----
         r0 = float(rewards[agent0_id])
         r1 = float(rewards[agent1_id])
         episode_reward0 += r0
@@ -214,35 +310,39 @@ def visualize_episode_step_by_step(
         history_rewards0.append(r0)
         history_rewards1.append(r1)
 
+        # ---- Track arrivals ----
         if next_obs_list[agent0_id]["arrived"]:
             arrived0 = True
         if next_obs_list[agent1_id]["arrived"]:
             arrived1 = True
 
+        # ---- Record trajectory ----
         obs_list = next_obs_list
         history_pos.append(tuple(env.pos))
         history_costs.append(tuple(env.cost))
 
-    # ----------------------------
-    # Plot + animation
-    # ----------------------------
+    # ============================================================================
+    # MATPLOTLIB VISUALIZATION
+    # ============================================================================
+    
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 7))
 
-    ax1.set_title(f"Episode {episode_num} - Positions des agents", fontsize=14, fontweight="bold")
+    # ---- Grid display (left) ----
+    ax1.set_title(f"Episode {episode_num} - Agent Positions", fontsize=14, fontweight="bold")
     ax1.set_xlim(-0.5, size - 0.5)
     ax1.set_ylim(-0.5, size - 0.5)
     ax1.set_xticks(range(size))
     ax1.set_yticks(range(size))
     ax1.grid(True, alpha=0.3)
     ax1.invert_yaxis()
-    ax1.set_xlabel("Colonne")
-    ax1.set_ylabel("Ligne")
+    ax1.set_xlabel("Column")
+    ax1.set_ylabel("Row")
 
-    # Goal
+    # Goal marker (green star)
     gr, gc = node_to_rc(goal, size)
     ax1.scatter([gc], [gr], marker="*", s=800, c="green", zorder=10, edgecolors="darkgreen", linewidth=2)
 
-    # Starts
+    # Starting positions (X markers in different colors)
     for i, start in enumerate(starts):
         sr, sc = node_to_rc(start, size)
         if i == 0:
@@ -253,10 +353,10 @@ def visualize_episode_step_by_step(
             color = "darkblue"
         ax1.scatter([sc], [sr], marker="x", s=300, c=color, alpha=0.5, linewidth=2)
 
-    # Agents
+    # Agent positions (animated scatter plot)
     scat = ax1.scatter([], [], s=300, alpha=0.85, edgecolors="black", linewidth=2)
 
-    # Info panel
+    # ---- Information panel (right) ----
     ax2.axis("off")
     info_text = ax2.text(
         0.05, 0.95, "",
@@ -267,21 +367,24 @@ def visualize_episode_step_by_step(
         bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.85),
     )
 
-    # Couleurs : agent0 rouge, agent1 orange, autres bleu
+    # ---- Agent colors and labels ----
+    # Red for Agent 0 (DQN), Orange for Agent 1 (DQN), Blue for others (Greedy)
     colors = ["blue"] * env.n_agents
     colors[0] = "red"
     colors[1] = "orange"
 
-    # Labels adaptés
     agent_names = [f"Agent {i} (Greedy)" for i in range(env.n_agents)]
     agent_names[0] = "Agent 0 (DQN)"
-    agent_names[1] = "Agent 1 (DQN)"  # Agents 2-9 restent greedy
+    agent_names[1] = "Agent 1 (DQN)"
 
+    # ---- Animation update function ----
     def update(frame: int):
+        """Update visualization for current frame."""
         positions = history_pos[frame]
         pts = []
         cols = []
 
+        # Build position array for scatter plot
         for i, p in enumerate(positions):
             r, c = node_to_rc(p, size)
             pts.append([c, r])
@@ -290,30 +393,40 @@ def visualize_episode_step_by_step(
         scat.set_offsets(np.array(pts))
         scat.set_color(cols)
 
+        # Build information text
         costs = history_costs[frame]
         info_str = f"Step: {frame}/{len(history_pos) - 1}\n"
         info_str += f"Goal node: {goal}\n"
         info_str += f"Arrived agent0: {arrived0} | agent1: {arrived1}\n"
-        info_str += "\nCoûts cumulés:\n"
+        info_str += "\nCumulative Costs:\n"
         for i in range(env.n_agents):
             info_str += f"  {agent_names[i]}: {costs[i]:.1f}\n"
 
-        info_str += f"\nReward total agent0: {episode_reward0:.1f}\n"
-        info_str += f"Reward total agent1: {episode_reward1:.1f}\n"
+        info_str += f"\nTotal Reward agent0: {episode_reward0:.1f}\n"
+        info_str += f"Total Reward agent1: {episode_reward1:.1f}\n"
 
         info_text.set_text(info_str)
         return scat, info_text
 
-    anim = FuncAnimation(fig, update, frames=len(history_pos), interval=interval_ms, blit=True, repeat=True)
+    # ---- Create animation ----
+    anim = FuncAnimation(
+        fig, 
+        update, 
+        frames=len(history_pos), 
+        interval=interval_ms, 
+        blit=True, 
+        repeat=True
+    )
 
+    # ---- Create legend ----
     legend_elements = [
         Line2D([0], [0], marker="*", color="w", markerfacecolor="green", markersize=15, label="Goal"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="red", markersize=10, label="Agent 0 (DQN)"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="orange", markersize=10, label="Agent 1 (DQN)"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="blue", markersize=10, label="Agents greedy"),
-        Line2D([0], [0], marker="x", color="darkred", linewidth=2, label="Départ agent 0"),
-        Line2D([0], [0], marker="x", color="darkorange", linewidth=2, label="Départ agent 1"),
-        Line2D([0], [0], marker="x", color="darkblue", linewidth=2, label="Départs greedy"),
+        Line2D([0], [0], marker="x", color="darkred", linewidth=2, label="Start agent 0"),
+        Line2D([0], [0], marker="x", color="darkorange", linewidth=2, label="Start agent 1"),
+        Line2D([0], [0], marker="x", color="darkblue", linewidth=2, label="Starts greedy"),
     ]
     ax1.legend(handles=legend_elements, loc="upper left", fontsize=10)
 
@@ -323,43 +436,50 @@ def visualize_episode_step_by_step(
     return (episode_reward0, arrived0, episode_reward1, arrived1, history_costs[-1])
 
 
+# ============================================================================
+# MAIN VISUALIZATION SCRIPT
+# ============================================================================
+
 def main():
+    """Load trained agents and visualize episodes."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # ---- Environment configuration ----
     cfg = EnvConfig(size=6, n_agents=10, max_steps=60, base_cost=1.0, goal_reward=20.0, seed=None)
     env = GridCongestionEnv(cfg)
 
-    # --- Load agent 0 ---
+    # ---- Load Agent 0 ----
     ckpt0 = pick_ckpt("checkpoints_single", 0)
     if ckpt0 is None:
-        print("✗ Aucun checkpoint trouvé pour agent0 dans checkpoints_single/")
+        print("✗ No checkpoint found for agent0 in checkpoints_single/")
         return
 
-    # --- Load agent 1 ---
+    # ---- Load Agent 1 ----
     ckpt1 = pick_ckpt("checkpoints_agent1", 1)
     if ckpt1 is None:
-        print("✗ Aucun checkpoint trouvé pour agent1 dans checkpoints_agent1/")
+        print("✗ No checkpoint found for agent1 in checkpoints_agent1/")
         return
 
-    print(f"=== Chargement agent0: {ckpt0} ===")
+    print(f"=== Loading Agent 0: {ckpt0} ===")
     model0 = load_trained_agent(ckpt0, cfg, device=device)
-    print("✓ agent0 chargé.")
+    print("✓ Agent 0 loaded.")
 
-    print(f"=== Chargement agent1: {ckpt1} ===")
+    print(f"=== Loading Agent 1: {ckpt1} ===")
     model1 = load_trained_agent(ckpt1, cfg, device=device)
-    print("✓ agent1 chargé.")
+    print("✓ Agent 1 loaded.")
 
+    # ---- Visualize episodes ----
     num_episodes = 5
     for ep in range(num_episodes):
         print(f"\nEpisode {ep+1}/{num_episodes}...")
         r0, a0, r1, a1, final_costs = visualize_episode_step_by_step(
             env, model0, model1, episode_num=ep + 1, device=device, interval_ms=500
         )
-        print(f"  Agent0 -> reward: {r0:.1f}, arrivé: {a0}")
-        print(f"  Agent1 -> reward: {r1:.1f}, arrivé: {a1}")
-        print(f"  Coûts finaux: {final_costs}")
+        print(f"  Agent0 -> reward: {r0:.1f}, arrived: {a0}")
+        print(f"  Agent1 -> reward: {r1:.1f}, arrived: {a1}")
+        print(f"  Final costs: {final_costs}")
 
-    print("\n=== Terminé ===")
+    print("\n=== Visualization Complete ===")
 
 
 if __name__ == "__main__":
