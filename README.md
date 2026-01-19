@@ -21,17 +21,22 @@ This project implements a congestion game environment where multiple agents (4 b
 ```
 CongestionGame/
 ├── env_6x6.py                              # Congestion game environment
-├── train_single_dqn.py                     # Single agent training
-├── train_second_agent_with_fixed_agent.py  # Two-agent training
-├── visualize_dqn_agent.py                  # Visualization and animation
+├── train_single_dqn.py                     # Single agent training script
+├── train_second_agent_with_fixed_agent.py  # Two-agent training script
+├── visualize_dqn_agent.py                  # Agent visualization and animation
+├── plot_rewards.py                         # Reward visualization utility
 ├── checkpoints_single/                     # Checkpoints for single agent
 │   ├── agent0_best.pt
 │   ├── agent0_final.pt
-│   └── training_meta.json
+│   ├── training_meta.json
+│   ├── training_rewards.csv                # Training rewards data
+│   └── training_rewards.png                # Reward evolution plot
 └── checkpoints_agent1/                     # Checkpoints for agent 1
     ├── agent1_best.pt
     ├── agent1_final.pt
-    └── training_meta.json
+    ├── training_meta.json
+    ├── training_rewards.csv                # Training rewards data
+    └── training_rewards.png                # Reward evolution plot
 ```
 
 ## Installation
@@ -88,6 +93,30 @@ The visualization shows:
 - Path traveled by each agent
 - Target goals
 - Evolution of rewards
+
+### 4. Plot Training Rewards
+
+Visualize the reward evolution during training with moving averages:
+
+```bash
+# Plot rewards from a single training run
+python plot_rewards.py checkpoints_single
+
+# Plot rewards with custom window size
+python plot_rewards.py checkpoints_single --window 100
+
+# Compare multiple training runs
+python plot_rewards.py checkpoints_single checkpoints_agent1 --compare --labels "Agent 0" "Agent 1"
+```
+
+**Output files generated:**
+- `training_rewards.png` : Visualization with episode rewards and moving average
+- `training_rewards.csv` : Raw data (episode, reward, moving_average) for external analysis
+
+The plots include:
+- Raw episode rewards (transparent)
+- Moving average with configurable window size
+- Statistical summary (min, max, mean, std dev)
 
 ## Neural Network Architecture
 
@@ -165,7 +194,9 @@ Best models and final models are saved in checkpoint folders:
 Each folder contains:
 - `agent0_best.pt` / `agent1_best.pt` : Best model found
 - `agent0_final.pt` / `agent1_final.pt` : Model after complete training
-- `training_meta.json` : Training metadata
+- `training_meta.json` : Training metadata and hyperparameters
+- `training_rewards.csv` : Episode-by-episode reward data (automatic)
+- `training_rewards.png` : Visualization plot (automatic)
 
 ## Applied Optimizations
 
@@ -174,6 +205,8 @@ Each folder contains:
 - Separate target network to reduce correlation
 - Epsilon-greedy exploration schedule
 - Automatic best model saving
+- **Training reward tracking with automatic visualization**
+- **Moving average analysis for convergence monitoring**
 
 ## Extension Points
 
@@ -184,7 +217,9 @@ Possibilities for project improvement:
 - Add static obstacles on the grid
 - Modify goals dynamically
 - Implement multi-agent RL with joint training
-- Add real-time performance graphs
+- Real-time performance graphs during training
+- Additional metrics tracking (path length, congestion analysis)
+- Tensorboard integration for advanced monitoring
 
 ## License
 
