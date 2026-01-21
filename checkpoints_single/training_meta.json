@@ -20,6 +20,6 @@
     "eps_decay_steps": 200000,
     "lr": 0.0005
   },
-  "best_window100_return": 15.627451660040611,
+  "best_window100_return": 15.724314575050762,
   "final_checkpoint": "checkpoints_single\\agent0_final.pt"
 }
